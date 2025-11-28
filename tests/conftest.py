@@ -1,15 +1,26 @@
 
-from datetime import datetime  # 正确的导入方式
 import pytest
 import allure
 import logging
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, Cookie
 import os
 import re
-import time
-# 原始代码无此导入，新增一行
+# tests/conftest.py 最顶部添加（先导入 sys 和 Path）
+import sys
+from pathlib import Path
+
+# 获取项目根目录（fireworks/）：conftest.py 的父目录（tests/）的父目录
+project_root = Path(__file__).resolve().parent.parent
+# 把项目根目录添加到 sys.path 最前面（优先搜索）
+sys.path.insert(0, str(project_root))
+
+# 之后再导入 HomePage（原代码不变）
+from tests.pages.home_page import HomePage
+# ... 其他原有代码
 import allure
 
+from tests.pages.home_page import HomePage
+from tests.pages.transport_license_application_page import *
 
 # 确保截图目录存在
 SCREENSHOT_DIR = "screenshots"
@@ -43,7 +54,7 @@ def pytest_runtest_makereport(item, call):
         page = item.funcargs["page"]
 
         # 生成唯一的截图文件名（包含时间戳和测试用例名）
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         # 清洗测试用例名称，移除特殊字符
         test_name = sanitize_filename(item.nodeid.replace("::", "_").replace("/", "_"))
         screenshot_path = os.path.join(SCREENSHOT_DIR, f"failed_{test_name}_{timestamp}.png")
@@ -85,30 +96,41 @@ def configure_logging():
 @pytest.fixture(scope="session")
 def browser():
     with sync_playwright() as p:
-        # 可以添加更多浏览器启动参数
+        # 旧版本Playwright忽略HTTPS错误的实现方式
         browser = p.chromium.launch(
             headless=False,
             args=[
-                  "--start-maximized",
-                  "--window-size=1920,1080",
-                  "--disable-dev-shm-usage" # 解决 WSL/Xvfb 无法捕获 dialog 问题
-                 ]  # 最大化窗口
+                "--start-maximized",
+                "--window-size=1920,1080",
+                "--disable-dev-shm-usage",
+                "--disable-javascript-breakpoints"  # 禁用JS断点
+            ]
         )
         yield browser
         browser.close()
 
 @pytest.fixture
 def page(browser):
-    page = browser.new_page(no_viewport=True)  # 使用实际窗口大小
+    context = browser.new_context(ignore_https_errors=True)
+
+    # 注入Cookie
+    cookie: Cookie = {
+        "name": "JSESSIONID",
+        "value": "81416546E118663AA085C76E82C8FDE6",
+        "domain": "192.168.50.53",
+        "path": "/",
+        "secure": True,
+        "httpOnly": True
+    }
+    context.add_cookies([cookie])
+
+    page = context.new_page()  # 使用实际窗口大小
     yield page
     page.close()
+    context.close()  # 关闭context
 
 @pytest.fixture(scope="session")
 def base_url():
-    return "https://192.168.50.53:16443/yhbzglxt-qy/"
-
-@pytest.fixture(scope="session")
-def suffix_home_url():
     return "https://192.168.50.53:16443/yhbzglxt-qy/index.do"
 
 @pytest.fixture(scope="session")
@@ -116,6 +138,14 @@ def test_password():
     return {
         "password": "1"
     }
+
+@pytest.fixture(scope="function")
+def transport_license_setup(page, base_url):
+    """免密登录"""
+    page.goto(base_url, timeout=10000)
+    home_page = HomePage(page)
+    home_page.navigate_to_page("许可证管理")
+    return TransportLicenseApplicationPage(page)
 
 def pytest_configure(config):
     # 注册更多自定义标记

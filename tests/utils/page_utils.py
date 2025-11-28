@@ -3,6 +3,7 @@ import datetime
 from playwright.sync_api import Page, FrameLocator
 # 假设你的 logging_config 配置正确
 from conf.logging_config import logger
+from playwright.sync_api import Dialog
 
 
 def get_top_frame_content(page: Page) -> FrameLocator:
@@ -234,3 +235,31 @@ def select_calendar_date(page: Page, target_date: datetime.date = None):
     except Exception as e:
         logger.error(f"选择日期 {target_date} 失败：{str(e)}")
         raise
+
+def handle_dialog(dialog: Dialog, page) -> None:
+    """
+    弹窗处理工具函数：截图 + 记录日志 + 自动确认关闭
+    :param dialog: Playwright 捕获的弹窗对象
+    :param page: Playwright Page 对象（用于截图）
+    """
+    try:
+        # 生成带时间戳的截图文件名（避免重复）
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # 精确到毫秒
+        screenshot_path = f"dialog_screenshots/dialog_{timestamp}.png"  # 统一存到文件夹
+
+        # 确保截图文件夹存在（不存在则创建）
+        import os
+        os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+
+        # 截取当前页面（包含弹窗）
+        page.screenshot(path=screenshot_path, full_page=False)  # full_page=False 只截可视区域（含弹窗）
+
+        # 记录日志（包含弹窗消息和截图路径）
+        logger.info(f"捕获弹窗：消息={dialog.message}，截图已保存至：{screenshot_path}")
+
+        # 自动确认关闭弹窗
+        dialog.accept()
+    except Exception as e:
+        logger.error(f"处理弹窗失败：{str(e)}", exc_info=True)
+        # 异常时仍尝试关闭弹窗，避免流程卡住
+        dialog.accept()
